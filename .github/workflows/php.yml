@@ -1,0 +1,135 @@
+name: PHP Composer
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Validate composer.json and composer.lock
+      run: composer validate --strict
+
+    - name: Cache Composer packages
+      id: composer-cache
+      uses: actions/cache@v3
+      with:
+        path: vendor
+        key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-php-
+
+    - name: Install dependencies
+      run: composer install --prefer-dist --no-progress
+
+    # Add a test script to composer.json, for instance: "test": "vendor/bin/phpunit"
+    # Docs: https://getcomposer.org/doc/articles/scripts.md
+
+    # - name: Run test suite
+    #   run: composer run-script test
+    <?php
+
+namespace YourNamespace;
+
+use pocketmine\command\Command;
+use pocketmine\command\CommandSender;
+use pocketmine\event\Listener;
+use pocketmine\event\player\PlayerCommandPreprocessEvent;
+use pocketmine\event\player\PlayerJoinEvent;
+use pocketmine\Player;
+use pocketmine\plugin\PluginBase;
+use pocketmine\utils\Config;
+use pocketmine\utils\TextFormat;
+
+class WarpPlugin extends PluginBase implements Listener {
+
+    /** @var Config */
+    private $warpsConfig;
+
+    public function onEnable() {
+        $this->getLogger()->info("WarpPlugin has been enabled!");
+
+        $this->getServer()->getPluginManager()->registerEvents($this, $this);
+
+        // Load or create warps configuration
+        $this->warpsConfig = new Config($this->getDataFolder() . "warps.yml", Config::YAML);
+    }
+
+    public function onDisable() {
+        $this->getLogger()->info("WarpPlugin has been disabled!");
+    }
+
+    public function onCommand(CommandSender $sender, Command $command, string $label, array $args): bool {
+        if ($label === "setwarp" && $sender instanceof Player) {
+            $this->setWarp($sender, $args);
+            return true;
+        } elseif ($label === "warp" && $sender instanceof Player) {
+            $this->teleportToWarp($sender, $args);
+            return true;
+        }
+        return false;
+    }
+
+    public function onPlayerJoin(PlayerJoinEvent $event) {
+        $player = $event->getPlayer();
+        // Teleport player to their saved warp on join
+        $this->teleportToSavedWarp($player);
+    }
+
+    public function onPlayerCommandPreprocess(PlayerCommandPreprocessEvent $event) {
+        $player = $event->getPlayer();
+        $message = $event->getMessage();
+
+        // Check if the player is using /warp command
+        if (strtolower(substr($message, 0, 5)) === "/warp") {
+            $this->teleportToWarp($player, explode(" ", $message)[1]);
+            $event->setCancelled(true);
+        }
+    }
+
+    private function setWarp(Player $player, array $args) {
+        if (isset($args[0])) {
+            $warpName = strtolower($args[0]);
+            $this->warpsConfig->set($warpName, ["x" => $player->getX(), "y" => $player->getY(), "z" => $player->getZ()]);
+            $this->warpsConfig->save();
+            $player->sendMessage(TextFormat::GREEN . "Warp '$warpName' set!");
+        } else {
+            $player->sendMessage(TextFormat::RED . "Usage: /setwarp <warpname>");
+        }
+    }
+
+    private function teleportToWarp(Player $player, array $args) {
+        if (isset($args[0])) {
+            $warpName = strtolower($args[0]);
+            $warpData = $this->warpsConfig->get($warpName);
+            if ($warpData !== null) {
+                $player->teleport($this->getServer()->getDefaultLevel()->getSafeSpawn());
+                $player->teleport($this->getServer()->getDefaultLevel()->getBlockAt($warpData["x"], $warpData["y"], $warpData["z"])->add(0.5, 0, 0.5));
+                $player->sendMessage(TextFormat::GREEN . "Teleported to warp '$warpName'!");
+            } else {
+                $player->sendMessage(TextFormat::RED . "Warp '$warpName' not found!");
+            }
+        } else {
+            $player->sendMessage(TextFormat::RED . "Usage: /warp <warpname>");
+        }
+    }
+
+    private function teleportToSavedWarp(Player $player) {
+        $savedWarp = $this->warpsConfig->get(strtolower($player->getName()));
+        if ($savedWarp !== null) {
+            $player->teleport($this->getServer()->getDefaultLevel()->getBlockAt($savedWarp["x"], $savedWarp["y"], $savedWarp["z"])->add(0.5, 0, 0.5));
+            $player->sendMessage(TextFormat::GREEN . "Teleported to your saved warp!");
+        }
+    }
+}
+
